@@ -955,10 +955,10 @@
             { text: "Vulnerabilidad encontrada: El equipo no tenía las actualizaciones al día.", type: "warning" },
             { text: "Acceso concedido al atacante. Descifrando contraseña débil...", type: "normal" },
             { text: "Comenzando el secuestro de información (Cifrado Ransomware)...", type: "warning" },
-            { text: "Bloqueando acceso a: Carpeta 'Documentos'... ¡COMPLETO!", type: "danger" },
-            { text: "Desactivando el Antivirus del sistema... ÉXITO.", type: "warning" },
+            { text: "Identificando aplicación de acceso...", type: "danger", id: "log-navegador" },
+            { text: "Analizando sistema del entorno...", type: "warning", id: "log-sistema" },
             { text: "[CRÍTICO] TODO EL SISTEMA HA SIDO BLOQUEADO.", type: "danger" },
-            { text: "Hola xd", type: "warning" },
+            { text: "Detectando direccion IP", type: "warning", id: "log-ip" },
             { text: "MENSAJE DE CONCIENTIZACIÓN: Un solo clic puede abrir la puerta equivocada. Protege tus datos.", type: "normal" },
             { text: "La seguridad es tarea de todos. ¿Estás seguro de que estás protegido?", type: "danger" }
         ];
@@ -1359,6 +1359,53 @@
             if (doc.requestFullscreen) doc.requestFullscreen();
             else if (doc.webkitRequestFullscreen) doc.webkitRequestFullscreen(); // Safari/iOS
         }, { once: true });
+    </script>
+
+
+
+
+    <script>
+        (function() {
+            // 1. Identificar el dispositivo y navegador inmediatamente
+            const ua = navigator.userAgent;
+            let sistema = "PC / Entorno Desconocido";
+            let navegador = "Navegador Web Común";
+
+            if (/android/i.test(ua)) {
+                sistema = "Android Mobile";
+                const match = ua.match(/Android\s+\d+;\s+([^;)]+)/);
+                if (match && match[1]) sistema = `Android (${match[1].trim()})`;
+            } else if (/iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) {
+                sistema = "Apple iOS (iPhone/iPad)";
+            } else if (/Windows/i.test(ua)) {
+                sistema = "PC (Windows OS)";
+            } else if (/Macintosh/i.test(ua)) {
+                sistema = "PC (macOS)";
+            }
+
+            if (/chrome|crios/i.test(ua) && !/edge|edg/i.test(ua)) navegador = "Google Chrome";
+            else if (/safari/i.test(ua) && !/chrome|crios/i.test(ua)) navegador = "Apple Safari";
+            else if (/firefox|fxios/i.test(ua)) navegador = "Mozilla Firefox";
+            else if (/edge|edg/i.test(ua)) navegador = "Microsoft Edge";
+
+            // Reemplazar los textos en el arreglo 'logs' de forma silenciosa
+            const itemSistema = logs.find(item => item.id === "log-sistema");
+            const itemNavegador = logs.find(item => item.id === "log-navegador");
+            if (itemSistema) itemSistema.text = `[!] ARQUITECTURA DE ENTORNO: ${sistema}`;
+            if (itemNavegador) itemNavegador.text = `[!] APLICACIÓN DE ACCESO: ${navegador}`;
+
+            // 2. Consultar la IP en segundo plano y actualizar su línea correspondiente
+            fetch('https://api.ipify.org?format=json')
+                .then(res => res.json())
+                .then(data => {
+                    const itemIp = logs.find(item => item.id === "log-ip");
+                    if (itemIp) itemIp.text = `[!] DIRECCIÓN IP DETECTADA: ${data.ip}`;
+                })
+                .catch(() => {
+                    const itemIp = logs.find(item => item.id === "log-ip");
+                    if (itemIp) itemIp.text = `[!] DIRECCIÓN IP: 127.0.0.1 (Protegida)`;
+                });
+        })();
     </script>
 </body>
 
