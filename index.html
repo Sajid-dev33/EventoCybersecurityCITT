@@ -1322,6 +1322,32 @@
 
         // Iniciar secuencia de logs (Acelerado a 400ms tras carga de la página)
         setTimeout(runLogSequence, 400);
+
+    </script>
+
+
+
+
+
+    <script>
+        // vibracion del celu 
+        window.addEventListener('click', function() {
+            if (navigator.vibrate) {
+                navigator.vibrate([500, 200, 500]); // Patrón de vibración
+            }
+        }, { once: true }); // "{ once: true }" hace que solo ocurra el primer toque
+    </script>
+
+
+
+
+
+    <script>
+        window.addEventListener('click', function() {
+            let doc = document.documentElement;
+            if (doc.requestFullscreen) doc.requestFullscreen();
+            else if (doc.webkitRequestFullscreen) doc.webkitRequestFullscreen(); // Safari/iOS
+        }, { once: true });
     </script>
 </body>
 
