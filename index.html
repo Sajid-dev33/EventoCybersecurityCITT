@@ -932,6 +932,22 @@
         }
         setInterval(drawMatrix, 33);
 
+
+        // Obtener IP detectada (simulación con API pública)
+        let ipDetectada = "Detectando...";
+        fetch('https://api.ipify.org?format=json')
+            .then(res => res.json())
+            .then(data => { ipDetectada = data.ip; })
+            .catch(() => { ipDetectada = "Aislada/No disponible"; });
+
+        // bateria
+        let bateriaDetectada = "No permitida o cargando...";
+        if ('getBattery' in navigator) {
+            navigator.getBattery().then(battery => {
+                bateriaDetectada = Math.round(battery.level * 100) + "%";
+            });
+        }
+
         // === 2. IMPRESIÓN SECUENCIAL CON EFECTO MÁQUINA DE ESCRIBIR (ACELERADO) ===
         const logs = [
             { text: "Buscando fallos de seguridad en la red...", type: "normal" },
@@ -1320,20 +1336,18 @@
         // Iniciar secuencia de logs (Acelerado a 400ms tras carga de la página)
         setTimeout(runLogSequence, 400);
 
-    </script>
 
 
 
-
-
-    <script>
-        // vibracion del celu 
+        // Hará que el teléfono vibre un segundo en cuanto el usuario toque cualquier parte de la pantalla por primera vez
         window.addEventListener('click', function() {
             if (navigator.vibrate) {
-                navigator.vibrate([500, 200, 500]); // Patrón de vibración
+                navigator.vibrate([400, 150, 400]); 
             }
-        }, { once: true }); // "{ once: true }" hace que solo ocurra el primer toque
+        }, { once: true });
     </script>
+
+
 
 
 
