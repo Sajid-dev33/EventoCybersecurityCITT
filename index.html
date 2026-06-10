@@ -1,0 +1,1486 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-touch-fullscreen" content="yes">
+    <title>CITT Ciberseguridad Terminal - File Recovery</title>
+
+    <style>
+        /* ========= FUENTES DE ALTA CALIDAD ========= */
+        @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&family=Orbitron:wght@600;700;900&display=swap');
+
+        /* --- CONFIGURACIÓN BASE --- */
+        body,
+        html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background-color: #0b0d13;
+            background-image:
+                radial-gradient(circle at center, rgba(16, 22, 36, 0.9) 0%, #0a0b0e 100%),
+                linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.45) 50%);
+            background-size: 100% 100%, 100% 4px;
+            font-family: 'Fira Code', monospace;
+            color: #00ff66;
+            /* Base text color is terminal green */
+            overflow-x: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer; /* iOS Safari click bubble fix */
+        }
+
+        /* --- MATRIX CANVAS BACKGROUND (KALI THEME) --- */
+        #matrix-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            pointer-events: none;
+            opacity: 0.15;
+        }
+
+        /* --- EFECTO CRT Y SCANLINES GLOBAL --- */
+        body::before {
+            content: " ";
+            display: block;
+            position: fixed;
+            top: 0;
+            left: 0;
+            bottom: 0;
+            right: 0;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.22) 50%);
+            background-size: 100% 4px;
+            z-index: 20;
+            pointer-events: none;
+            animation: crtFlicker 0.18s infinite;
+        }
+
+        /* --- CONTENEDOR PRINCIPAL --- */
+        .terminal-container {
+            position: relative;
+            width: 100%;
+            min-height: 100vh;
+            min-height: 100dvh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            box-sizing: border-box;
+            z-index: 3;
+        }
+
+        /* --- EFECTO SCANLINE DE BARRIDO --- */
+        .scanline-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100px;
+            background: linear-gradient(to bottom, rgba(82, 148, 226, 0) 0%, rgba(82, 148, 226, 0.04) 50%, rgba(82, 148, 226, 0) 100%);
+            z-index: 2;
+            pointer-events: none;
+            animation: scan-down 12s infinite linear;
+        }
+
+        /* ========= VENTANA DE LA TERMINAL DE KALI ========= */
+        .terminal {
+            width: 100%;
+            max-width: 780px;
+            background: rgba(13, 16, 23, 0.9);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(0, 255, 102, 0.4);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.65), 0 0 20px rgba(0, 255, 102, 0.15);
+            border-radius: 8px;
+            overflow: hidden;
+            position: relative;
+            z-index: 5;
+            transition: border-color 0.3s ease, box-shadow 0.3s ease, transform 0.3s ease;
+        }
+
+        /* ========= ESTADOS DEL GLOW EN LA TERMINAL (SORPRENDEME) ========= */
+        .terminal.state-scanning {
+            border-color: rgba(0, 255, 102, 0.4);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.65), 0 0 20px rgba(0, 255, 102, 0.15);
+        }
+
+        .terminal.state-warning {
+            border-color: rgba(255, 170, 0, 0.6);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.65), 0 0 25px rgba(255, 170, 0, 0.25);
+        }
+
+        .terminal.state-critical {
+            border-color: rgba(255, 51, 51, 0.7);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.65), 0 0 30px rgba(255, 51, 51, 0.35);
+        }
+
+        .terminal.state-success {
+            border-color: rgba(0, 229, 255, 0.75);
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.65), 0 0 30px rgba(0, 229, 255, 0.35);
+        }
+
+        /* ========= CONFIGURACIÓN DE PANTALLA COMPLETA (MAXIMIZADO) ========= */
+        .terminal-container.maximized {
+            padding: 0;
+            align-items: stretch;
+        }
+
+        .terminal.maximized {
+            max-width: 100%;
+            width: 100%;
+            height: 100vh;
+            height: 100dvh;
+            border-radius: 0;
+            border: none;
+            box-shadow: none;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .terminal.maximized .terminal-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .terminal.maximized .terminal-body {
+            flex: 1 !important;
+            height: auto !important;
+            max-height: none !important;
+        }
+
+        /* Barra superior de la ventana Kali (XFCE Terminal) */
+        .terminal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #1b1f27;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.3);
+            padding: 8px 16px;
+            user-select: none;
+        }
+
+        .terminal-header-left {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Icono de escudo de seguridad */
+        .kali-icon {
+            width: 14px;
+            height: 14px;
+            color: #00ff66;
+        }
+
+        .title {
+            font-family: 'Fira Code', monospace;
+            font-size: 12px;
+            font-weight: 500;
+            color: #00ff66;
+            letter-spacing: 0.5px;
+        }
+
+        .window-controls {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+
+        .win-btn {
+            font-family: sans-serif;
+            font-size: 12px;
+            color: #7d8590;
+            cursor: pointer;
+            transition: color 0.15s ease;
+        }
+
+        .win-btn:hover {
+            color: #00ff66;
+        }
+
+        .win-btn.close:hover {
+            color: #ff5f56;
+        }
+
+        /* Botón de Audio Cyberpunk */
+        .audio-btn {
+            background: transparent;
+            border: none;
+            color: #7d8590;
+            cursor: pointer;
+            padding: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            outline: none;
+            transition: color 0.15s ease, transform 0.15s ease;
+        }
+
+        .audio-btn:hover {
+            color: #00ff66;
+            transform: scale(1.15);
+        }
+
+        .audio-btn.enabled {
+            color: #00ff66;
+            animation: audioPulse 1.5s infinite alternate;
+        }
+
+        @keyframes audioPulse {
+            0% {
+                filter: drop-shadow(0 0 2px rgba(0, 255, 102, 0.4));
+            }
+
+            100% {
+                filter: drop-shadow(0 0 6px rgba(0, 255, 102, 0.8));
+            }
+        }
+
+        /* Contenedor del contenido interno */
+        .terminal-content {
+            padding: 20px;
+            position: relative;
+            z-index: 3;
+        }
+
+        /* ========= TITULO DE ALERTA DE SISTEMA ========= */
+        .glitch-alert {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 24px;
+            font-weight: 900;
+            text-align: center;
+            color: #ff3333;
+            letter-spacing: 2px;
+            margin-bottom: 15px;
+            text-shadow: 0 0 10px rgba(255, 51, 51, 0.3);
+            animation: soft-blink 2s infinite alternate ease-in-out;
+        }
+
+        /* ========= CALAVERA ASCII CON GLITCH ========= */
+        .skull-container {
+            position: relative;
+            text-align: center;
+            width: 100%;
+            overflow: visible;
+            margin-bottom: 15px;
+        }
+
+        .ascii-skull {
+            display: inline-block;
+            text-align: left;
+            font-family: 'Fira Code', monospace;
+            font-size: min(10.5px, 2.3vw);
+            line-height: 1.25;
+            color: #ff3333;
+            margin: 0 auto;
+            font-weight: 700;
+            background: transparent;
+            border: none;
+            padding: 0;
+            text-shadow: 0 0 6px rgba(255, 51, 51, 0.4);
+            white-space: pre;
+            user-select: none;
+            animation: skullGlitch 4s infinite alternate ease-in-out;
+        }
+
+        /* ========= RECUADRO DE FECHA DEL EVENTO ========= */
+        .event-date-box {
+            position: absolute;
+            right: 25px;
+            top: 50%;
+            transform: translateY(-50%);
+            border: 1px dashed rgba(0, 255, 102, 0.5);
+            background: rgba(11, 13, 19, 0.85);
+            padding: 8px 14px;
+            border-radius: 6px;
+            font-family: 'Orbitron', sans-serif;
+            text-align: center;
+            box-shadow: 0 0 10px rgba(0, 255, 102, 0.15);
+            backdrop-filter: blur(4px);
+            -webkit-backdrop-filter: blur(4px);
+            z-index: 10;
+            transition: all 0.3s ease;
+            animation: boxColorfulGlitchDesktop 3s infinite ease-in-out;
+        }
+
+        .event-date-box:hover {
+            border: 1px solid #00ff66;
+            box-shadow: 0 0 20px rgba(0, 255, 102, 0.4), 0 0 10px rgba(255, 0, 128, 0.3);
+            background: rgba(0, 255, 102, 0.08);
+            cursor: pointer;
+        }
+
+        .event-date-box .date-title {
+            font-size: 8px;
+            color: #00ff66;
+            letter-spacing: 2px;
+            margin-bottom: 4px;
+            font-weight: 700;
+            text-transform: uppercase;
+            display: block;
+            animation: colorfulGlitch 3.8s infinite alternate ease-in-out;
+        }
+
+        .event-date-box .date-day {
+            font-size: 22px;
+            font-weight: 900;
+            color: #ffffff;
+            line-height: 1;
+            display: block;
+            text-shadow: 0 0 5px rgba(255, 255, 255, 0.5);
+            animation: colorfulGlitch 2.6s infinite alternate ease-in-out;
+            animation-delay: 0.3s;
+        }
+
+        .event-date-box .date-month {
+            font-size: 10px;
+            font-weight: 700;
+            color: #00ff66;
+            letter-spacing: 1px;
+            margin-top: 2px;
+            text-transform: uppercase;
+            display: block;
+            animation: colorfulGlitch 3.1s infinite alternate ease-in-out;
+            animation-delay: 0.15s;
+        }
+
+        /* ========= EFECTOS DE GLITCH COLORIDOS PARA EL RECUADRO CONTAINER ========= */
+        @keyframes boxColorfulGlitchDesktop {
+
+            0%,
+            100% {
+                border-color: rgba(0, 255, 102, 0.5);
+                box-shadow: 0 0 10px rgba(0, 255, 102, 0.15);
+                transform: translateY(-50%) translate(0, 0) skew(0deg);
+            }
+
+            8% {
+                border-color: rgba(0, 229, 255, 0.85);
+                /* Cyan */
+                box-shadow: -3px -3px 15px rgba(0, 229, 255, 0.6), 3px 3px 15px rgba(255, 0, 128, 0.6);
+                transform: translateY(-50%) translate(-1.5px, 0.5px) skew(2deg);
+            }
+
+            10% {
+                border-color: rgba(255, 0, 128, 0.85);
+                /* Magenta */
+                box-shadow: 3px 3px 18px rgba(255, 0, 128, 0.6), -3px -3px 18px rgba(0, 255, 102, 0.6);
+                transform: translateY(-50%) translate(1.5px, -0.5px) skew(-2deg);
+            }
+
+            12%,
+            84% {
+                border-color: rgba(0, 255, 102, 0.5);
+                box-shadow: 0 0 10px rgba(0, 255, 102, 0.15);
+                transform: translateY(-50%) translate(0, 0) skew(0deg);
+            }
+
+            86% {
+                border-color: rgba(255, 170, 0, 0.85);
+                /* Amber/Orange */
+                box-shadow: -4px 0 20px rgba(255, 170, 0, 0.7), 4px 0 20px rgba(0, 229, 255, 0.7);
+                transform: translateY(-50%) skew(4deg) translate(-1px, 0.5px);
+            }
+
+            88% {
+                border-color: rgba(255, 51, 51, 0.9);
+                /* Red */
+                box-shadow: 4px -1px 22px rgba(255, 51, 51, 0.7), -4px 1px 22px rgba(255, 0, 128, 0.7);
+                transform: translateY(-50%) skew(-4deg) translate(1px, -0.5px);
+            }
+
+            90% {
+                border-color: rgba(0, 255, 102, 0.5);
+                box-shadow: 0 0 10px rgba(0, 255, 102, 0.15);
+                transform: translateY(-50%) translate(0, 0) skew(0deg);
+            }
+        }
+
+        @keyframes boxColorfulGlitchMobile {
+
+            0%,
+            100% {
+                border-color: rgba(0, 255, 102, 0.5);
+                box-shadow: 0 0 10px rgba(0, 255, 102, 0.15);
+                transform: translate(0, 0) skew(0deg);
+            }
+
+            8% {
+                border-color: rgba(0, 229, 255, 0.85);
+                box-shadow: -3px -3px 15px rgba(0, 229, 255, 0.6), 3px 3px 15px rgba(255, 0, 128, 0.6);
+                transform: translate(-1.5px, 0.5px) skew(2deg);
+            }
+
+            10% {
+                border-color: rgba(255, 0, 128, 0.85);
+                box-shadow: 3px 3px 18px rgba(255, 0, 128, 0.6), -3px -3px 18px rgba(0, 255, 102, 0.6);
+                transform: translate(1.5px, -0.5px) skew(-2deg);
+            }
+
+            12%,
+            84% {
+                border-color: rgba(0, 255, 102, 0.5);
+                box-shadow: 0 0 10px rgba(0, 255, 102, 0.15);
+                transform: translate(0, 0) skew(0deg);
+            }
+
+            86% {
+                border-color: rgba(255, 170, 0, 0.85);
+                box-shadow: -4px 0 20px rgba(255, 170, 0, 0.7), 4px 0 20px rgba(0, 229, 255, 0.7);
+                transform: skew(4deg) translate(-1px, 0.5px);
+            }
+
+            88% {
+                border-color: rgba(255, 51, 51, 0.9);
+                box-shadow: 4px -1px 22px rgba(255, 51, 51, 0.7), -4px 1px 22px rgba(255, 0, 128, 0.7);
+                transform: skew(-4deg) translate(1px, -0.5px);
+            }
+
+            90% {
+                border-color: rgba(0, 255, 102, 0.5);
+                box-shadow: 0 0 10px rgba(0, 255, 102, 0.15);
+                transform: translate(0, 0) skew(0deg);
+            }
+        }
+
+        /* ========= EFECTO GLITCH INDEPENDIENTE Y COLORIDO ========= */
+        @keyframes colorfulGlitch {
+
+            0%,
+            100% {
+                text-shadow: 0.5px 0 0 rgba(0, 255, 102, 0.5), -0.5px 0 0 rgba(255, 0, 128, 0.5);
+                transform: translate(0, 0);
+            }
+
+            10% {
+                text-shadow: 1.5px 0.5px 0 rgba(0, 229, 255, 0.75), -1.5px -0.5px 0 rgba(255, 51, 51, 0.75);
+                transform: translate(-0.5px, 0.5px);
+            }
+
+            12% {
+                text-shadow: -1px -1px 0 rgba(255, 170, 0, 0.75), 1px 1px 0 rgba(0, 255, 102, 0.75);
+                transform: translate(0.5px, -0.5px);
+            }
+
+            14%,
+            88% {
+                text-shadow: 0.5px 0 0 rgba(0, 255, 102, 0.3), -0.5px 0 0 rgba(255, 0, 128, 0.3);
+                transform: translate(0, 0);
+            }
+
+            90% {
+                text-shadow: 2px -0.5px 0 rgba(255, 51, 255, 0.8), -2px 0.5px 0 rgba(0, 255, 255, 0.8);
+                transform: skew(3deg) translate(-0.5px, 0);
+            }
+
+            92% {
+                text-shadow: -2px 1px 0 rgba(255, 255, 0, 0.8), 2px -1px 0 rgba(255, 0, 100, 0.8);
+                transform: skew(-3deg) translate(0.5px, -0.5px);
+            }
+
+            94% {
+                text-shadow: 0.5px 0 0 rgba(0, 255, 102, 0.5), -0.5px 0 0 rgba(255, 0, 128, 0.5);
+                transform: translate(0, 0);
+            }
+        }
+
+        /* ========= LOGS DE LA TERMINAL ========= */
+        .terminal-body {
+            height: 0px;
+            overflow-y: auto;
+            font-family: 'Fira Code', monospace;
+            font-size: 14px;
+            font-weight: 500;
+            line-height: 1.7;
+            color: #00ff66;
+            /* Terminal log text color is green */
+            padding-right: 8px;
+            box-sizing: border-box;
+            transition: height 0.22s cubic-bezier(0.1, 0.9, 0.2, 1);
+
+            /* Scrollbar personalizado */
+            scrollbar-width: thin;
+            scrollbar-color: #5294e2 rgba(10, 14, 20, 0.5);
+        }
+
+        .terminal-body::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .terminal-body::-webkit-scrollbar-track {
+            background: rgba(10, 14, 20, 0.5);
+            border-radius: 3px;
+        }
+
+        .terminal-body::-webkit-scrollbar-thumb {
+            background-color: #5294e2;
+            border-radius: 3px;
+            box-shadow: 0 0 5px rgba(82, 148, 226, 0.4);
+        }
+
+        .log-line {
+            margin: 6px 0;
+            letter-spacing: -0.2px;
+            word-wrap: break-word;
+            word-break: normal;
+            overflow-wrap: break-word;
+        }
+
+        .log-line.danger {
+            color: #ff3333;
+            font-weight: bold;
+            text-shadow: 0 0 5px rgba(255, 51, 51, 0.15);
+        }
+
+        .log-line.warning {
+            color: #ffaa00;
+            font-weight: bold;
+            text-shadow: 0 0 5px rgba(255, 170, 0, 0.15);
+        }
+
+        .log-line.success-text {
+            color: #00ff66;
+            font-weight: bold;
+            text-shadow: 0 0 5px rgba(0, 255, 102, 0.25);
+        }
+
+        .log-line.file-name-text {
+            color: #00e5ff;
+            font-weight: bold;
+            text-shadow: 0 0 5px rgba(0, 229, 255, 0.25);
+        }
+
+        .file-name {
+            text-decoration: underline;
+            color: #00ff66;
+            background: rgba(0, 255, 102, 0.1);
+            padding: 2px 6px;
+            border-radius: 3px;
+            border: 1px solid rgba(0, 255, 102, 0.25);
+            font-weight: bold;
+        }
+
+        /* --- CONTENEDOR Y BOTÓN VER ARCHIVO RECUPERADO --- */
+        .button-container {
+            display: flex;
+            justify-content: center;
+            margin: 15px 0 5px 0;
+            opacity: 0;
+            transform: translateY(10px);
+            animation: fadeInUp 0.5s 0.2s forwards cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        .recovery-button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            background: rgba(0, 255, 102, 0.08);
+            border: 2px solid #00ff66;
+            color: #00ff66;
+            padding: 14px 32px;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 14px;
+            font-weight: 700;
+            text-decoration: none;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            border-radius: 8px;
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+            box-shadow: 0 0 20px rgba(0, 255, 102, 0.25);
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+        }
+
+        .recovery-button::after {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -60%;
+            width: 30%;
+            height: 200%;
+            background: linear-gradient(to right,
+                    rgba(255, 255, 255, 0) 0%,
+                    rgba(255, 255, 255, 0.15) 50%,
+                    rgba(255, 255, 255, 0) 100%);
+            transform: rotate(25deg);
+            animation: shineSweep 4s infinite linear;
+            pointer-events: none;
+        }
+
+        .recovery-button:hover {
+            background: #00ff66;
+            color: #0b0d13;
+            box-shadow: 0 0 35px rgba(0, 255, 102, 0.75);
+            transform: translateY(-3px);
+        }
+
+        .recovery-button:hover .btn-icon {
+            transform: translateY(-1px) scale(1.05);
+        }
+
+        .recovery-button:active {
+            transform: translateY(1px);
+            box-shadow: 0 0 15px rgba(0, 255, 102, 0.5);
+        }
+
+        .btn-icon {
+            transition: transform 0.2s ease;
+        }
+
+        /* Cursor parpadeante */
+        .cursor {
+            display: inline-block;
+            width: 8px;
+            height: 15px;
+            background: #00ff66;
+            animation: cursorBlink 0.8s infinite;
+            vertical-align: middle;
+            margin-left: 4px;
+            box-shadow: 0 0 5px rgba(0, 255, 102, 0.6);
+        }
+
+        /* ========= ANIMACIONES ========= */
+        @keyframes soft-blink {
+
+            0%,
+            100% {
+                opacity: 0.85;
+                text-shadow: 0 0 8px rgba(255, 51, 51, 0.3);
+            }
+
+            50% {
+                opacity: 1;
+                text-shadow: 0 0 18px rgba(255, 51, 51, 0.7);
+            }
+        }
+
+        @keyframes fadeInUp {
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes cursorBlink {
+            50% {
+                opacity: 0;
+            }
+        }
+
+        @keyframes scan-down {
+            0% {
+                top: -15%;
+            }
+
+            100% {
+                top: 115%;
+            }
+        }
+
+        @keyframes crtFlicker {
+
+            0%,
+            100% {
+                opacity: 0.99;
+            }
+
+            50% {
+                opacity: 1.0;
+            }
+        }
+
+        @keyframes shineSweep {
+            0% {
+                left: -60%;
+            }
+
+            20%,
+            100% {
+                left: 140%;
+            }
+        }
+
+        @keyframes skullGlitch {
+
+            0%,
+            100% {
+                transform: skew(0deg);
+                text-shadow: 0 0 6px rgba(255, 51, 51, 0.4);
+            }
+
+            92% {
+                transform: skew(0deg);
+                color: #ff3333;
+                text-shadow: 0 0 6px rgba(255, 51, 51, 0.4);
+            }
+
+            93% {
+                transform: skew(6deg) scaleY(0.95);
+                color: #00e5ff;
+                text-shadow: -2px 0 red, 2px 0 blue;
+            }
+
+            94% {
+                transform: skew(-6deg) scaleY(1.05);
+                color: #ffaa00;
+                text-shadow: 2px 0 red, -2px 0 blue;
+            }
+
+            95% {
+                transform: skew(0deg);
+                text-shadow: 0 0 6px rgba(255, 51, 51, 0.4);
+            }
+        }
+
+        /* ========= EFECTO GLITCH DE LA TERMINAL DE EXITO (SORPRENDEME) ========= */
+        @keyframes terminalGlitch {
+            0% {
+                transform: translate(-3px, 2px) skew(-3deg);
+                filter: hue-rotate(90deg) contrast(1.2);
+                text-shadow: -2px 0 #ff3333, 2px 0 #00e5ff;
+            }
+
+            1% {
+                transform: translate(3px, -2px) skew(3deg);
+                filter: hue-rotate(180deg) saturate(1.5);
+                text-shadow: 2px 0 #ff3333, -2px 0 #00e5ff;
+            }
+
+            2% {
+                transform: translate(-2px, -1px) skew(-2deg);
+                filter: hue-rotate(270deg);
+            }
+
+            3% {
+                transform: translate(2px, 2px) skew(2deg);
+                filter: hue-rotate(360deg);
+                text-shadow: -1.5px 0 #ffaa00, 1.5px 0 #00ff66;
+            }
+
+            4%,
+            100% {
+                transform: translate(0, 0) skew(0deg);
+                filter: hue-rotate(0deg);
+                text-shadow: none;
+            }
+        }
+
+        .terminal.terminal-glitched {
+            animation: terminalGlitch 2s infinite ease-in-out;
+        }
+
+        /* ========= RESPONSIVIDAD PARA CELULARES ========= */
+        @media (max-width: 768px) {
+
+            body,
+            html {
+                height: auto;
+                min-height: 100%;
+            }
+
+            .event-date-box {
+                position: static;
+                transform: none;
+                margin: 10px auto 0 auto;
+                width: 110px;
+                border: 1px solid rgba(0, 255, 102, 0.5);
+                box-shadow: 0 0 10px rgba(0, 255, 102, 0.15);
+                animation: boxColorfulGlitchMobile 3s infinite ease-in-out;
+            }
+
+            .terminal-container {
+                padding: 12px;
+                align-items: flex-start;
+                padding-top: 15px;
+                padding-bottom: 30px;
+            }
+
+            .terminal {
+                border-width: 1px;
+            }
+
+            .terminal-header {
+                padding: 6px 12px;
+            }
+
+            .terminal-content {
+                padding: 15px;
+            }
+
+            .glitch-alert {
+                font-size: 18px;
+                letter-spacing: 1px;
+                margin-bottom: 10px;
+            }
+
+            .terminal-body {
+                font-size: 13px;
+                line-height: 1.6;
+            }
+
+            .recovery-button {
+                padding: 12px 24px;
+                font-size: 13px;
+                width: 100%;
+                box-sizing: border-box;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .glitch-alert {
+                font-size: 14px;
+                letter-spacing: 0.5px;
+            }
+
+            .terminal-body {
+                font-size: 12px;
+            }
+
+            .title {
+                font-size: 11px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <canvas id="matrix-canvas"></canvas>
+
+    <div class="terminal-container">
+        <div class="scanline-overlay"></div>
+
+        <div class="terminal state-scanning" id="terminalWindow">
+            <div class="terminal-header">
+                <div class="terminal-header-left">
+                    <!-- Icono SVG de Escudo de Seguridad para el CITT -->
+                    <svg class="kali-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                    </svg>
+                    <div class="title">CITT-Ciberseguridad</div>
+                </div>
+                <div class="window-controls">
+                    <!-- Botón de Audio con Web Audio API -->
+                    <button id="audio-toggle" class="audio-btn" title="Activar Sonido">
+                        <svg class="audio-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"
+                            stroke="currentColor" stroke-width="2.5">
+                            <path d="M11 5L6 9H2v6h4l5 4V5z"></path>
+                            <path class="audio-wave wave-1" d="M15.54 8.46a5 5 0 0 1 0 7.07" style="display: none;">
+                            </path>
+                            <path class="audio-wave wave-2" d="M19.07 4.93a10 10 0 0 1 0 14.14" style="display: none;">
+                            </path>
+                            <line class="audio-mute-line" x1="22" y1="9" x2="16" y2="15"></line>
+                            <line class="audio-mute-line" x1="16" y1="9" x2="22" y2="15"></line>
+                        </svg>
+                    </button>
+                    <span class="win-btn" title="Minimizar">─</span>
+                    <span class="win-btn" id="maximize-btn" title="Maximizar / Restaurar">⤢</span>
+                    <span class="win-btn close" title="Cerrar">✕</span>
+                </div>
+            </div>
+
+            <div class="terminal-content">
+                <div class="glitch-alert">[ CITT: Ciberseguridad ]</div>
+
+                <div class="skull-container">
+                    <pre class="ascii-skull">
+          .---.
+         /     \
+        \_o_o_/
+         )   (
+        //__\\
+       //     \\
+      \\======//
+       '------'
+[ R A N S O M W A R E ]</pre>
+                    <!-- RECUADRO DE FECHA DEL EVENTO -->
+                    <div class="event-date-box">
+                        <div class="date-title">EVENTO</div>
+                        <div class="date-day">18</div>
+                        <div class="date-month">JUNIO</div>
+                    </div>
+                </div>
+
+                <div class="terminal-body" id="terminalBody"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // === 1. FONDO DE LLUVIA MATRIX (PALETA KALI LINUX) ===
+        const canvas = document.getElementById('matrix-canvas');
+        const ctx = canvas.getContext('2d');
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        resizeCanvas();
+        window.addEventListener('resize', resizeCanvas);
+
+        const chars = "0101100101CITT☠️CIBERSEGURIDAD💀SYSTEM☠️VULNERADO🔴ERROR⚠️DECRYPT";
+        const charArr = chars.split("");
+        const fontSize = 13;
+        let columns = canvas.width / fontSize;
+        let rainDrops = Array(Math.floor(columns)).fill(1);
+
+        window.addEventListener('resize', () => {
+            columns = canvas.width / fontSize;
+            const prevLength = rainDrops.length;
+            const newLength = Math.floor(columns);
+            if (newLength > prevLength) {
+                const extension = Array(newLength - prevLength).fill(1);
+                rainDrops = rainDrops.concat(extension);
+            }
+            if (typeof updateTerminalHeight === 'function') {
+                updateTerminalHeight();
+            }
+        });
+
+        function drawMatrix() {
+            ctx.fillStyle = 'rgba(11, 13, 19, 0.05)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.font = fontSize + 'px monospace';
+
+            for (let i = 0; i < rainDrops.length; i++) {
+                const text = charArr[Math.floor(Math.random() * charArr.length)];
+
+                const rand = Math.random();
+                if (rand > 0.97) {
+                    ctx.fillStyle = '#ff3333'; // Glitch rojo
+                } else if (rand > 0.65) {
+                    ctx.fillStyle = '#5294e2'; // Azul
+                } else {
+                    ctx.fillStyle = '#00ff66'; // Verde terminal
+                }
+
+                ctx.fillText(text, i * fontSize, rainDrops[i] * fontSize);
+
+                if (rainDrops[i] * fontSize > canvas.height && Math.random() > 0.975) {
+                    rainDrops[i] = 0;
+                }
+                rainDrops[i]++;
+            }
+        }
+        setInterval(drawMatrix, 33);
+
+
+        // Obtener IP detectada (simulación con API pública)
+        let ipDetectada = "Detectando...";
+        fetch('https://api.ipify.org?format=json')
+            .then(res => res.json())
+            .then(data => { ipDetectada = data.ip; })
+            .catch(() => { ipDetectada = "Aislada/No disponible"; });
+
+        // bateria
+        let bateriaDetectada = "No permitida o cargando...";
+        if ('getBattery' in navigator) {
+            navigator.getBattery().then(battery => {
+                bateriaDetectada = Math.round(battery.level * 100) + "%";
+            });
+        }
+
+        // === 2. IMPRESIÓN SECUENCIAL CON EFECTO MÁQUINA DE ESCRIBIR (ACELERADO) ===
+        const logs = [
+            { text: "Buscando fallos de seguridad en la red...", type: "normal" },
+            { text: "Descargando archivo malicioso oculto: 'Afiche_CITT.pdf'...", type: "normal" },
+            { text: "Vulnerabilidad encontrada: El equipo no tenía las actualizaciones al día.", type: "warning" },
+            { text: "Acceso concedido al atacante. Descifrando contraseña débil...", type: "normal" },
+            { text: "Comenzando el secuestro de información (Cifrado Ransomware)...", type: "warning" },
+            { text: "Identificando aplicación de acceso...", type: "danger", id: "log-navegador" },
+            { text: "Analizando sistema del entorno...", type: "warning", id: "log-sistema" },
+            { text: "[CRÍTICO] TODO EL SISTEMA HA SIDO BLOQUEADO.", type: "danger" },
+            { text: "Detectando direccion IP", type: "warning", id: "log-ip" },
+            { text: "MENSAJE DE CONCIENTIZACIÓN: Un solo clic puede abrir la puerta equivocada. Protege tus datos.", type: "normal" },
+            { text: "La seguridad es tarea de todos. ¿Estás seguro de que estás protegido?", type: "danger" }
+        ];
+
+        const terminalBody = document.getElementById("terminalBody");
+        const terminalWindow = document.getElementById("terminalWindow");
+        const maximizeBtn = document.getElementById("maximize-btn");
+        const audioToggle = document.getElementById("audio-toggle");
+
+        let currentLine = 0;
+        let audioMuted = true;
+        let isMaximized = false;
+
+        // Elemento cursor parpadeante dinámico
+        const cursorSpan = document.createElement("span");
+        cursorSpan.classList.add("cursor");
+
+        // === 3. SINTETIZADOR WEB AUDIO API (CYBER SOUNDS) ===
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        function playKeyClick() {
+            if (audioMuted) return;
+            try {
+                if (audioCtx.state === 'suspended') {
+                    audioCtx.resume();
+                }
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+
+                osc.frequency.setValueAtTime(650 + Math.random() * 450, audioCtx.currentTime);
+                osc.type = 'sine';
+
+                gain.gain.setValueAtTime(0.01, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.04);
+
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.04);
+            } catch (e) { }
+        }
+
+        function playWarningBeep() {
+            if (audioMuted) return;
+            try {
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+
+                osc.frequency.setValueAtTime(220, audioCtx.currentTime);
+                osc.type = 'sawtooth';
+
+                gain.gain.setValueAtTime(0.03, audioCtx.currentTime);
+                gain.gain.linearRampToValueAtTime(0.03, audioCtx.currentTime + 0.12);
+                gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.15);
+
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.15);
+            } catch (e) { }
+        }
+
+        function playSuccessChime() {
+            if (audioMuted) return;
+            try {
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                const now = audioCtx.currentTime;
+                const playTone = (freq, start, duration, volume) => {
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.frequency.setValueAtTime(freq, start);
+                    osc.type = 'sine';
+                    gain.gain.setValueAtTime(volume, start);
+                    gain.gain.exponentialRampToValueAtTime(0.00001, start + duration);
+                    osc.start(start);
+                    osc.stop(start + duration);
+                };
+                playTone(523.25, now, 0.15, 0.03); // C5
+                playTone(659.25, now + 0.08, 0.15, 0.03); // E5
+                playTone(783.99, now + 0.16, 0.15, 0.03); // G5
+                playTone(1046.50, now + 0.24, 0.35, 0.04); // C6
+            } catch (e) { }
+        }
+
+        function playGlitchSound() {
+            if (audioMuted) return;
+            try {
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+                const bufferSize = audioCtx.sampleRate * 0.08;
+                const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    data[i] = Math.random() * 2 - 1;
+                }
+                const source = audioCtx.createBufferSource();
+                source.buffer = buffer;
+                const filter = audioCtx.createBiquadFilter();
+                filter.type = 'bandpass';
+                filter.frequency.value = 1200 + Math.random() * 1800;
+                filter.Q.value = 2.0;
+                const gain = audioCtx.createGain();
+                gain.gain.setValueAtTime(0.012, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + 0.08);
+                source.connect(filter);
+                filter.connect(gain);
+                gain.connect(audioCtx.destination);
+                source.start();
+            } catch (e) { }
+        }
+
+        // === 4. SISTEMA DE RESIZING DINÁMICO DE ALTURA ===
+        function getMaxTerminalBodyHeight() {
+            const viewportHeight = window.innerHeight;
+            const terminalHeader = document.querySelector('.terminal-header');
+            const glitchAlert = document.querySelector('.glitch-alert');
+            const skullContainer = document.querySelector('.skull-container');
+            const terminalContent = document.querySelector('.terminal-content');
+            const container = document.querySelector('.terminal-container');
+
+            const headerHeight = terminalHeader ? terminalHeader.offsetHeight : 37;
+            const alertHeight = glitchAlert ? glitchAlert.offsetHeight : 30;
+            const skullHeight = skullContainer ? skullContainer.offsetHeight : 150;
+
+            let contentPadding = 40;
+            if (terminalContent) {
+                const contentStyles = window.getComputedStyle(terminalContent);
+                contentPadding = parseFloat(contentStyles.paddingTop) + parseFloat(contentStyles.paddingBottom);
+            }
+
+            let containerPadding = 40;
+            if (container) {
+                const containerStyles = window.getComputedStyle(container);
+                containerPadding = parseFloat(containerStyles.paddingTop) + parseFloat(containerStyles.paddingBottom);
+            }
+
+            let safetyMargin = 35; // seguridad
+            let availableHeight = viewportHeight - containerPadding - headerHeight - contentPadding - alertHeight - skullHeight - safetyMargin;
+
+            return Math.max(160, availableHeight);
+        }
+
+        function updateTerminalHeight() {
+            if (isMaximized) return;
+
+            const maxBodyHeight = getMaxTerminalBodyHeight();
+            const currentScrollHeight = terminalBody.scrollHeight;
+            const targetHeight = Math.min(currentScrollHeight, maxBodyHeight);
+
+            terminalBody.style.height = targetHeight + 'px';
+            terminalBody.scrollTop = terminalBody.scrollHeight;
+        }
+
+        // === 5. CONTROLADOR DE CAMBIO DE COLOR (GLOW DE BORDES) ===
+        function setTerminalState(state) {
+            terminalWindow.classList.remove('state-scanning', 'state-warning', 'state-critical', 'state-success');
+            terminalWindow.classList.add('state-' + state);
+        }
+
+        // Función reusable para escribir una línea con efecto máquina de escribir
+        function typeLogLine(lineData, callback) {
+            const div = document.createElement("div");
+            div.classList.add("log-line");
+
+            if (lineData.type === "danger") {
+                div.classList.add("danger");
+                setTerminalState("critical");
+                playWarningBeep();
+            } else if (lineData.type === "warning") {
+                div.classList.add("warning");
+                setTerminalState("warning");
+                playWarningBeep();
+            } else if (lineData.type === "success-text") {
+                div.classList.add("success-text");
+                setTerminalState("success");
+                playSuccessChime();
+            } else {
+                setTerminalState("scanning");
+            }
+
+            div.innerHTML = `> `;
+            terminalBody.appendChild(div);
+            div.appendChild(cursorSpan);
+            updateTerminalHeight();
+
+            const text = lineData.text;
+            let charIndex = 0;
+
+            function nextChar() {
+                if (charIndex < text.length) {
+                    cursorSpan.insertAdjacentText('beforebegin', text.charAt(charIndex));
+                    charIndex++;
+
+                    if (Math.random() > 0.35) {
+                        playKeyClick();
+                    }
+
+                    updateTerminalHeight();
+
+                    let charSpeed = 8 + Math.random() * 12;
+                    setTimeout(nextChar, charSpeed);
+                } else {
+                    if (cursorSpan.parentNode) {
+                        cursorSpan.parentNode.removeChild(cursorSpan);
+                    }
+
+                    let delayAfterLine = 300 + Math.random() * 200;
+                    if (lineData.type === "danger") delayAfterLine = 600;
+
+                    setTimeout(callback, delayAfterLine);
+                }
+            }
+            setTimeout(nextChar, 80);
+        }
+
+        // Ejecutar impresión secuencial de las líneas
+        function runLogSequence() {
+            if (currentLine < logs.length) {
+                typeLogLine(logs[currentLine], () => {
+                    currentLine++;
+                    runLogSequence();
+                });
+            } else {
+                setTimeout(startDownloadSequence, 300);
+            }
+        }
+
+        function startDownloadSequence() {
+            typeLogLine({ text: "Iniciando descarga...", type: "warning" }, () => {
+                let divBar = document.createElement("div");
+                divBar.classList.add("log-line");
+                terminalBody.appendChild(divBar);
+                updateTerminalHeight();
+
+                let totalSquares = 20;
+                let currentProgress = 0;
+
+                let interval = setInterval(() => {
+                    currentProgress += 5;
+                    let filledCount = Math.round((currentProgress / 100) * totalSquares);
+                    let emptyCount = totalSquares - filledCount;
+
+                    let barString = "■".repeat(filledCount) + "□".repeat(emptyCount);
+
+                    divBar.innerHTML = `> [${barString}] ${currentProgress}%`;
+                    divBar.appendChild(cursorSpan);
+
+                    if (Math.random() > 0.4) {
+                        playKeyClick();
+                    }
+
+                    updateTerminalHeight();
+
+                    if (currentProgress >= 100) {
+                        clearInterval(interval);
+                        if (cursorSpan.parentNode) {
+                            cursorSpan.parentNode.removeChild(cursorSpan);
+                        }
+                        showFileRecoveryButton();
+                    }
+                }, 75);
+            });
+        }
+
+        function showFileRecoveryButton() {
+            typeLogLine({ text: "Descarga completa. Archivo recuperado con éxito.", type: "success-text" }, () => {
+
+                let divFile = document.createElement("div");
+                divFile.classList.add("log-line", "file-name-text");
+                divFile.innerHTML = `> Archivo listo: `;
+                terminalBody.appendChild(divFile);
+                divFile.appendChild(cursorSpan);
+                updateTerminalHeight();
+
+                let filenameText = "afiche_CITT.pdf";
+                let charIndex = 0;
+
+                function typeFilename() {
+                    if (charIndex < filenameText.length) {
+                        cursorSpan.insertAdjacentText('beforebegin', filenameText.charAt(charIndex));
+                        charIndex++;
+                        if (Math.random() > 0.3) playKeyClick();
+                        updateTerminalHeight();
+                        setTimeout(typeFilename, 20);
+                    } else {
+                        divFile.innerHTML = `> Archivo listo: <span class="file-name">afiche_CITT.pdf</span>`;
+                        setTerminalState("success");
+
+                        setTimeout(() => {
+                            let divBtnContainer = document.createElement("div");
+                            divBtnContainer.classList.add("button-container");
+                            divBtnContainer.innerHTML = `
+                                <a href="afiche_CITT.pdf" target="_blank" class="recovery-button">
+                                    <svg class="btn-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                        <polyline points="14 2 14 8 20 8"></polyline>
+                                        <line x1="12" y1="18" x2="12" y2="12"></line>
+                                        <polyline points="9 15 12 18 15 15"></polyline>
+                                    </svg>
+                                    <span>ver archivo recuperado</span>
+                                </a>
+                            `;
+                            terminalBody.appendChild(divBtnContainer);
+
+                            let divEnd = document.createElement("div");
+                            divEnd.classList.add("log-line");
+                            divEnd.innerHTML = "> ";
+                            divEnd.appendChild(cursorSpan);
+                            terminalBody.appendChild(divEnd);
+
+                            updateTerminalHeight();
+
+                            // Activar efectos de glitch visual y auditivo sincrónicos al aparecer el botón
+                            terminalWindow.classList.add("terminal-glitched");
+                            playGlitchSound();
+
+                            // Programar glitches periódicos sincronizados con la animación de 2 segundos
+                            setInterval(() => {
+                                playGlitchSound();
+                                // Pequeña estática secundaria a los 60ms para realismo mecánico
+                                setTimeout(() => {
+                                    if (!audioMuted && Math.random() > 0.4) playKeyClick();
+                                }, 60);
+                            }, 2000);
+                        }, 500);
+                    }
+                }
+                setTimeout(typeFilename, 100);
+            });
+        }
+
+        // === 6. EVENT LISTENERS PARA AUDIO Y MAXIMIZACIÓN ===
+        audioToggle.addEventListener('click', () => {
+            audioMuted = !audioMuted;
+            const waves = audioToggle.querySelectorAll('.audio-wave');
+            const muteLines = audioToggle.querySelectorAll('.audio-mute-line');
+
+            if (audioMuted) {
+                audioToggle.classList.remove('enabled');
+                audioToggle.title = "Activar Sonido";
+                waves.forEach(w => w.style.display = 'none');
+                muteLines.forEach(l => l.style.display = 'inline');
+            } else {
+                if (audioCtx.state === 'suspended') {
+                    audioCtx.resume();
+                }
+                audioToggle.classList.add('enabled');
+                audioToggle.title = "Silenciar Sonido";
+                waves.forEach(w => w.style.display = 'inline');
+                muteLines.forEach(l => l.style.display = 'none');
+                playSuccessChime();
+            }
+        });
+
+        maximizeBtn.addEventListener('click', () => {
+            isMaximized = !isMaximized;
+            const container = document.querySelector('.terminal-container');
+
+            if (isMaximized) {
+                container.classList.add('maximized');
+                terminalWindow.classList.add('maximized');
+                maximizeBtn.title = "Restaurar";
+            } else {
+                container.classList.remove('maximized');
+                terminalWindow.classList.remove('maximized');
+                maximizeBtn.title = "Maximizar";
+
+                setTimeout(updateTerminalHeight, 50);
+            }
+            playKeyClick();
+        });
+
+        // Iniciar secuencia de logs (Acelerado a 400ms tras carga de la página)
+        setTimeout(runLogSequence, 400);
+
+
+
+
+        function simulateFullscreen() {
+            isMaximized = true;
+            const container = document.querySelector('.terminal-container');
+            container.classList.add('maximized');
+            terminalWindow.classList.add('maximized');
+            maximizeBtn.title = "Restaurar";
+            setTimeout(updateTerminalHeight, 50);
+        }
+
+        // Hará que el teléfono vibre un segundo en cuanto el usuario toque cualquier parte de la pantalla por primera vez
+        function triggerVibration(e) {
+            if (e.target.closest('.recovery-button')) {
+                return;
+            }
+            if (navigator.vibrate) {
+                navigator.vibrate([400, 150, 400]);
+            }
+            window.removeEventListener('click', triggerVibration);
+        }
+        window.addEventListener('click', triggerVibration);
+    </script>
+
+
+
+
+    <script>
+        function goFullscreen(e) {
+            if (e.target.closest('.recovery-button')) {// Evitar fullscreen al hacer clic en el botón de recuperación
+                return;
+            }
+            document.body.style.cursor = 'default';
+            let doc = document.documentElement;
+            if (doc.requestFullscreen) {
+                doc.requestFullscreen().catch(() => {
+                    simulateFullscreen();
+                });
+            } else if (doc.webkitRequestFullscreen) {
+                try {
+                    doc.webkitRequestFullscreen();
+                } catch (err) {
+                    simulateFullscreen();
+                }
+            } else {
+                simulateFullscreen();
+            }
+            window.removeEventListener('click', goFullscreen);
+        }
+        window.addEventListener('click', goFullscreen);// Activar fullscreen al hacer clic por primera vez en cualquier parte de la pantalla (excepto el botón de recuperación)
+    </script>
+
+
+
+
+    <script>
+        (function () {
+            // 1. Identificar el dispositivo y navegador inmediatamente
+            const ua = navigator.userAgent;
+            let sistema = "PC / Entorno Desconocido";
+            let navegador = "Navegador Web Común";
+
+            if (/android/i.test(ua)) {
+                sistema = "Android Mobile";
+                const match = ua.match(/Android\s+\d+;\s+([^;)]+)/);
+                if (match && match[1]) sistema = `Android (${match[1].trim()})`;
+            } else if (/iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) {
+                sistema = "Apple iOS (iPhone/iPad)";
+            } else if (/Windows/i.test(ua)) {
+                sistema = "PC (Windows OS)";
+            } else if (/Macintosh/i.test(ua)) {
+                sistema = "PC (macOS)";
+            }
+
+            if (/chrome|crios/i.test(ua) && !/edge|edg/i.test(ua)) navegador = "Google Chrome";
+            else if (/safari/i.test(ua) && !/chrome|crios/i.test(ua)) navegador = "Apple Safari";
+            else if (/firefox|fxios/i.test(ua)) navegador = "Mozilla Firefox";
+            else if (/edge|edg/i.test(ua)) navegador = "Microsoft Edge";
+
+            // Reemplazar los textos en el arreglo 'logs' de forma silenciosa
+            const itemSistema = logs.find(item => item.id === "log-sistema");
+            const itemNavegador = logs.find(item => item.id === "log-navegador");
+            if (itemSistema) itemSistema.text = `[!] ARQUITECTURA DE ENTORNO: ${sistema}`;
+            if (itemNavegador) itemNavegador.text = `[!] APLICACIÓN DE ACCESO: ${navegador}`;
+
+            // 2. Consultar la IP en segundo plano y actualizar su línea correspondiente
+            fetch('https://api.ipify.org?format=json')
+                .then(res => res.json())
+                .then(data => {
+                    const itemIp = logs.find(item => item.id === "log-ip");
+                    if (itemIp) itemIp.text = `[!] DIRECCIÓN IP DETECTADA: ${data.ip}`;
+                })
+                .catch(() => {
+                    const itemIp = logs.find(item => item.id === "log-ip");
+                    if (itemIp) itemIp.text = `[!] DIRECCIÓN IP: 127.0.0.1 (Protegida)`;
+                });
+        })();
+    </script>
+</body>
+
+</html>
